@@ -1,0 +1,321 @@
+---
+title: "Cheese"
+author: "Louis Bonnard"
+format: html
+editor: visual
+---
+
+```{r,warning=FALSE,message=FALSE}
+cheeses <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2024/2024-06-04/cheeses.csv')
+
+```
+
+```{r,warning=FALSE,message=FALSE}
+library(skimr)
+library(tidyverse)
+library(ggthemes)
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+library(ggridges)
+library(RColorBrewer)
+library(ggsci)
+library(viridis)
+library(ggrepel)
+library(gt)
+```
+
+![](plateau-fromages.jpg)
+
+# Introduction
+
+Le fromage est un aliment emblématique, produit à partir du lait de divers mammifères tels que les vaches, les chèvres, ou encore les brebis. Chaque variété de fromage se distingue par des caractéristiques uniques, influencées par son origine géographique, le type de lait utilisé, les méthodes de fabrication, ainsi que par des propriétés spécifiques telles que la texture, l'arôme et la saveur.
+
+Ce rapport vise à explorer un jeu de données provenant du site **cheese.com**, afin d'analyser les différentes caractéristiques des fromages, et d'examiner les relations potentielles entre ces propriétés.
+
+```{r,message=FALSE}
+
+dims <- dim(cheeses)
+
+dims_df <- data.frame(
+  Description = c("Nombre d'observations", "Nombre de variables"),
+  Valeur = c(dims[1], dims[2])
+)
+
+dims_df %>%
+  gt() %>%
+  tab_header(
+    title = "Dimensions du Dataset 'cheeses'"
+  ) %>%
+  cols_label(
+    Description = "Description",
+    Valeur = "Valeur"
+  ) %>%
+  tab_style(
+    style = cell_text(weight = "bold"),
+    locations = cells_column_labels()
+  ) %>%
+  opt_table_font(
+    font = "Arial"
+  )
+
+```
+
+```{r,message=FALSE}
+skim_data <- skim(cheeses)
+
+skim_data %>%
+  gt() %>%
+  tab_header(
+    title = "Résumé Statistique du Dataset 'cheeses'",
+    subtitle = "Résumé structuré des colonnes"
+  ) %>%
+  tab_style(
+    style = cell_text(weight = "bold"),
+    locations = cells_column_labels()
+  ) %>%
+  opt_table_font(
+    font = "Arial"
+  )
+
+
+```
+
+Avant de procéder à l'analyse, j'ai transformé la colonne fat_content du type caractère au type numérique. Cette conversion est nécessaire pour permettre des analyses quantitatives et faciliter des opérations telles que le calcul de moyennes, de distributions ou d'autres statistiques descriptives sur le taux de matières grasses .
+
+```{r,message=FALSE}
+cheeses <- cheeses %>% 
+  mutate(fat_content_num= str_extract(fat_content, "\\d+\\.?\\d*") %>% as.numeric())
+
+
+```
+
+# Quels sont les pays qui produisent le plus de fromages dans le jeux de données ?
+
+```{r,message=FALSE}
+
+cheeses_separated <- cheeses %>%
+  separate_rows(country, sep = ", ")  
+
+cheese_counts <- cheeses_separated %>%
+  count(country) %>%
+  arrange(desc(n)) %>%
+  top_n(15)  
+
+ggplot(cheese_counts) +
+  aes(x = reorder(country, n), y = n, fill = country)+
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  labs(title = "Top 15 des pays producteurs de fromage",
+       x = "Pays", 
+       y = "Nombre de fromages") +
+  theme_minimal() +
+  theme(legend.position = "none",
+        axis.text.y = element_text(size = 10),  
+        plot.title = element_text(hjust = 0.5)) +  
+  geom_text(aes(label = n), hjust = -0.2, size = 3)  
+
+```
+
+# La teneur en matières grasses des fromages varie-t-elle en fonction des pays producteurs ?
+
+```{r,warning=FALSE}
+
+fat_content_by_country <- cheeses_separated %>%
+  group_by(country) %>%
+  summarise(mean_fat_content = mean(fat_content_num, na.rm = TRUE)) %>%
+  arrange(desc(mean_fat_content))
+
+
+top_countries <- fat_content_by_country %>%
+  top_n(30, mean_fat_content) %>%
+  pull(country)
+
+global_mean <- mean(fat_content_by_country$mean_fat_content, na.rm = TRUE)
+
+
+ggplot(fat_content_by_country %>% filter(country %in% top_countries), 
+       aes(x = mean_fat_content, y = reorder(country, mean_fat_content), color = country)) +
+  geom_point(size = 4, alpha = 0.7) +  
+  geom_text_repel(aes(label = round(mean_fat_content, 1)), size = 4, show.legend = FALSE) +  
+  geom_vline(xintercept = global_mean, linetype = "dashed", color = "red", size = 1) +  
+  scale_color_viridis_d(option = "plasma") + 
+  labs(title = "Moyenne des Matières Grasses par Pays",
+       x = "Moyenne des Matières Grasses (%)", 
+       y = "Pays") +
+  theme_minimal() +
+  theme(legend.position = "none", plot.title = element_text(hjust = 0.5))  
+
+```
+
+Les résultats de cette analyse montrent que certains pays produisent effectivement des fromages plus gras que d'autres. Les pays de l'Est de l'Europe comme la Croatie, la Hongrie et la Lituanie, ont des fromages plus riches en matières grasses que certains pays occidentaux comme la france, la belgique ou bien la Grande Bretagne.
+
+# Est ce que les fromages ont des aromes différentes selon le pays d'origine ?
+
+```{r,,warning=FALSE,message=FALSE}
+
+
+min_count <- 4
+
+aroma_by_country_filtered <- cheeses %>%
+  filter(!is.na(country), !is.na(aroma)) %>%  
+  group_by(country, aroma) %>%
+  summarise(count = n()) %>%
+  filter(count >= min_count)  
+ 
+ggplot(aroma_by_country_filtered, aes(x = country, y = aroma, size = count)) +
+  geom_point(aes(color = aroma), alpha = 0.7) +  
+  scale_size(range = c(3, 10)) +  
+  labs(title = "Fréquence des Arômes par Pays",
+       x = "Pays",
+       y = "Arôme") +
+  theme_minimal() +
+  theme( legend.position="none",axis.text.x = element_text(angle = 45, hjust = 1)) +  
+  scale_color_viridis_d()  
+
+
+```
+
+Le pays d'origine influence les arômes des fromages. Chaque pays semble avoir des profils qui leurs sont propre. Les fromages français vont avoir une grande diversité tandis que le Canada et l'Angleterre montrent une gamme plus limitée mais significative.
+
+# Comment sont répartis les arômes d'un fromage selon son type de lait ?
+
+```{r,warning=FALSE,message=FALSE}
+
+
+min_count <- 15
+
+frequent_aromas <- cheeses %>%
+  filter(!is.na(aroma), !is.na(milk)) %>%
+  group_by(aroma) %>%
+  filter(n() >= min_count) 
+
+frequent_aromas_summary <- frequent_aromas %>%
+  group_by(aroma) %>%
+  summarise(count = n()) %>%
+  arrange(desc(count))
+
+
+
+aroma_by_milk <- frequent_aromas %>%
+  top_n(15) %>% 
+  group_by(milk, aroma) %>%
+  summarise(count = n()) %>%
+  arrange(milk, desc(count))
+
+
+ggplot(frequent_aromas) +
+  aes(x = milk, y = aroma)+
+  geom_point(aes(color = aroma), position = position_jitter(width = 0.2, height = 0)) +
+  labs(title = "Répartition des Arômes selon le Type de Lait",
+       x = "Type de Lait",
+       y = "Arôme") +
+  theme_minimal() +
+  theme(legend.position="none",axis.text.x = element_text(angle = 45, hjust = 1))  
+
+```
+
+Les résulats indiquent que le type de lait utilisé influence considérablement les arômes des fromages. Les fromages au lait de vache présentent une plus grande richesse en arômes, tandis que les fromages au lait de chèvre sont souvent associés à des arômes plus léger et frais. Cette observation souligne l'importance de choisir le bon type de lait pour avoir les arômes souhaitées pour son fromage.
+
+# Est ce qu'il y a une relation entre le type de fromage et son taux de matières grasses ?
+
+```{r,warning=FALSE,message=FALSE}
+filtered_cheeses <- cheeses %>%
+  drop_na(fat_content_num, type) %>%
+  group_by(type) %>%
+  filter(n() >= 5)  
+
+
+
+
+ggplot(filtered_cheeses, aes(x = fat_content_num, y = reorder(type, fat_content_num, FUN = median), fill = type)) +
+  geom_density_ridges(alpha = 0.7) +
+  stat_summary(aes(x = fat_content_num, y = type), fun = "median", geom = "point", color = "red", size = 3, shape = 18)+
+  labs(title = "Distribution des matières grasses par type de fromage",
+       x = "Taux de matières grasses (%)", y = "Type de fromage") +
+  scale_fill_viridis_d() +  
+  theme_minimal()+
+  theme(legend.position="none")
+
+  
+```
+
+On constate qu'il y a bien une relation entre le type de fromage et son taux de matière grasse. Les fromages classés comme soft, blue-veined et hard, artisan tendent à être plus gras, tandis que ceux de type fresh soft , soft ripened par exemple sont moins riche.
+
+```{r,warning=FALSE}
+resultats_statistiques <- filtered_cheeses %>%
+  group_by(type) %>%
+  summarise(
+    moyenne_mg = mean(fat_content_num, na.rm = TRUE),
+    mediane_mg = median(fat_content_num, na.rm = TRUE),
+    ecart_type_mg = sd(fat_content_num, na.rm = TRUE),
+    min_mg = min(fat_content_num, na.rm = TRUE),
+    max_mg = max(fat_content_num, na.rm = TRUE),
+    n = n()  
+  ) %>%
+  arrange(desc(moyenne_mg))  
+
+
+resultats_statistiques %>%
+  gt() %>%
+  tab_header(
+    title = md("**Statistiques descriptives par Type de Fromage**"),
+    subtitle = md("Analyse de la teneur en matières grasses (MG)")
+  ) %>%
+  fmt_number(
+    columns = 2:6,  
+    decimals = 2  
+  ) %>%
+  data_color(
+    columns = 2:6,
+    colors = scales::col_numeric(
+      palette = c("white", "orange", "red"),
+      domain = NULL
+    )
+  ) %>%
+  tab_style(
+    style = list(
+      cell_text(weight = "bold", color = "blue")
+    ),
+    locations = cells_column_labels()  
+  ) %>%
+  tab_style(
+    style = list(
+      cell_text(size = px(12))
+    ),
+    locations = cells_body()
+  )
+
+```
+
+# 
+
+# Existe-t-il une tendance de couleur spécifique pour certains types de fromage ?
+
+```{r,warning=FALSE}
+
+min_count <- 4
+
+cheese_color_count <- cheeses %>%
+  filter(!is.na(type), !is.na(color)) %>%  
+  group_by(type, color) %>%
+  summarise(count = n(), .groups = "drop") %>%
+  filter(count >= min_count) %>%  
+  arrange(type, desc(count))
+
+ggplot(cheese_color_count, aes(x = type, y = count, fill = color)) +
+  geom_bar(stat = "identity", position = "fill") +  
+  labs(title = "Répartition des Couleurs par Type de Fromage (min. 4 occurrences)",
+       x = "Type de Fromage",
+       y = "Proportion des Couleurs",
+       fill = "Couleur du Fromage") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  
+
+```
+
+Les résultats montrent clairement qu'il existe des tendances de couleur distinctes en fonction du type de fromage. Par exemple on voit que les fromages frais tendent à être principalement blanc, tandis que les fromages durs sont souvent jaunes ou pâles.
+
+# Conclusion
+
+L'analyse des données sur les fromages a permis de mettre en évidence plusieurs relations intéressantes entre leurs caractéristiques, telles que le type de lait utilisé, la teneur en matières grasses, et l'origine géographique. Ces résultats soulignent la diversité des fromages et l'influence de divers facteurs sur leurs propriétés.
